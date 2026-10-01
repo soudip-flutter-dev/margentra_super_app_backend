@@ -18,6 +18,10 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Python Version
+      - key: PYTHON_VERSION
+        value: 3.12.7
+
       # App Settings
       - key: APP_NAME
         value: MargNetra Super App
