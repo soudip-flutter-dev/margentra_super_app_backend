@@ -24,8 +24,10 @@ router = APIRouter(prefix="/auth", tags=["Auth"])
 
 @router.post("/register", response_model=UserProfileOut, status_code=201)
 async def register_user(data: RegisterRequest, db: DBDep):
+    
     """Register a new MargNetra user."""
     user = await auth_service.register_user(db, data)
+    
     return user
 
 

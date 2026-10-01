@@ -8,7 +8,7 @@ import string
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -81,18 +81,35 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
 
     await db.commit()
     await db.refresh(user)
+
+    print(
+        f"\n========================================================\n"
+        f"🎉 [NEW USER REGISTERED]\n"
+        f"   • User ID    : {user.id}\n"
+        f"   • Full Name  : {user.full_name}\n"
+        f"   • Phone      : {user.phone}\n"
+        f"   • Email      : {user.email or 'N/A'}\n"
+        f"========================================================\n",
+        flush=True,
+    )
     return user
 
 
 async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
-    result = await db.execute(select(User).where(User.phone == data.phone))
+    identifier = (data.phone or data.email or data.username or "").strip()
+    result = await db.execute(
+        select(User).where(or_(User.phone == identifier, User.email == identifier))
+    )
     user = result.scalar_one_or_none()
+
     if not user or not verify_password(data.password, user.hashed_password):
+        print(f"\n⚠️  [LOGIN FAILED] Invalid credentials for: '{identifier}'\n", flush=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid phone or password",
+            detail="Invalid phone, email, or password",
         )
     if not user.is_active:
+        print(f"\n⚠️  [LOGIN BLOCKED] Inactive account for: '{identifier}'\n", flush=True)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
     access_token = create_access_token(user.id)
@@ -106,6 +123,19 @@ async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
     )
     db.add(token_record)
     await db.commit()
+
+    print(
+        f"\n========================================================\n"
+        f"👤 [USER LOGIN SUCCESS]\n"
+        f"   • User ID    : {user.id}\n"
+        f"   • Full Name  : {user.full_name}\n"
+        f"   • Phone      : {user.phone}\n"
+        f"   • Email      : {user.email or 'N/A'}\n"
+        f"   • Civil Score: {user.civil_score}\n"
+        f"   • Streak Days: {user.driving_streak_days}\n"
+        f"========================================================\n",
+        flush=True,
+    )
 
     return TokenResponse(
         access_token=access_token,

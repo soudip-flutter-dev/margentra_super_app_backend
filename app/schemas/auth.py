@@ -10,20 +10,20 @@ class RegisterRequest(BaseModel):
     phone: str
     email: EmailStr | None = None
     password: str
-    confirm_password: str
+    confirm_password: str | None = None
 
     @model_validator(mode="after")
     def passwords_match(self) -> "RegisterRequest":
-        if self.password != self.confirm_password:
+        if self.confirm_password is not None and self.password != self.confirm_password:
             raise ValueError("password and confirm_password do not match")
         return self
 
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v: str) -> str:
-        v = v.strip()
+        v = v.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         if not v.lstrip("+").isdigit() or len(v) < 7:
-            raise ValueError("Invalid phone number")
+            raise ValueError("Invalid phone number format")
         return v
 
     @field_validator("password")
@@ -35,8 +35,16 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    phone: str
+    phone: str | None = None
+    email: str | None = None
+    username: str | None = None
     password: str
+
+    @model_validator(mode="after")
+    def validate_identifier(self) -> "LoginRequest":
+        if not self.phone and not self.email and not self.username:
+            raise ValueError("Please provide either 'phone' or 'email' to login")
+        return self
 
 
 class ForgotPasswordRequest(BaseModel):
