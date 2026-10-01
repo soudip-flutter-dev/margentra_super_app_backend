@@ -1,0 +1,113 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Render Blueprint Specification (Infrastructure-as-Code)
+# MargNetra Super App — FastAPI Backend + Managed PostgreSQL + Redis
+# ─────────────────────────────────────────────────────────────────────────────
+# Docs: https://render.com/docs/blueprint-spec
+
+version: "1"
+
+services:
+  # ─── FastAPI Web Service ──────────────────────────────────────────────────
+  - type: web
+    name: margnetra-backend
+    runtime: python
+    region: oregon                  # Options: oregon, frankfurt, singapore, ohio
+    plan: starter                   # Options: free, starter, standard, pro
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # App Settings
+      - key: APP_NAME
+        value: MargNetra Super App
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: ALLOWED_HOSTS
+        value: "*"
+
+      # Security & JWT Tokens (Auto-generated cryptographically secure keys)
+      - key: SECRET_KEY
+        generateValue: true
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "30"
+
+      # PostgreSQL Database Connection (Injected automatically from managed DB)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: margnetra-db
+          property: connectionString
+      - key: SYNC_DATABASE_URL
+        fromDatabase:
+          name: margnetra-db
+          property: connectionString
+
+      # Redis (Injected automatically from managed Redis service)
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: margnetra-redis
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: margnetra-redis
+          property: connectionString
+
+      # File Storage: Set to false and fill AWS keys below when using S3
+      - key: USE_LOCAL_STORAGE
+        value: "true"
+      - key: LOCAL_STORAGE_PATH
+        value: uploads
+
+      # AWS S3 / Compatible Object Storage (Optional: set in Render Dashboard)
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: ap-south-1
+      - key: S3_BUCKET_NAME
+        value: margnetra-storage
+
+      # External APIs (Fill in Render Dashboard under Environment Variables)
+      - key: RTO_API_BASE_URL
+        value: https://api.vahan.nic.in/v1
+      - key: RTO_API_KEY
+        sync: false
+      - key: DIGILOCKER_CLIENT_ID
+        sync: false
+      - key: DIGILOCKER_CLIENT_SECRET
+        sync: false
+
+      # Gamification & MGC Wallet Settings
+      - key: MGC_PER_KM_RATE
+        value: "1.5"
+      - key: MGC_BONUS_STREAK_DAYS
+        value: "7"
+      - key: MGC_STREAK_PROTECTION_COST
+        value: "50.0"
+
+  # ─── Managed Redis Instance ───────────────────────────────────────────────
+  - type: redis
+    name: margnetra-redis
+    region: oregon
+    plan: starter                   # Options: free, starter, standard
+    ipAllowList: []                 # Internal-only access (restricted to Render services)
+
+databases:
+  # ─── Managed PostgreSQL 16 Database ───────────────────────────────────────
+  - name: margnetra-db
+    databaseName: margnetra_db
+    user: margnetra
+    region: oregon
+    plan: starter                   # Options: free, starter, standard
+    postgresMajorVersion: 16
