@@ -56,3 +56,63 @@ def test_postgres_backend_resolution():
     assert s.DB_BACKEND == "postgres"
     assert s.DATABASE_URL == pg_async
     assert s.SYNC_DATABASE_URL == pg_sync
+
+
+def test_render_postgres_database_url_resolution():
+    """Verify that cloud DATABASE_URL provided by Render takes precedence over localhost default."""
+    render_url = "postgres://margnetra_user:secret123@ep-sample-render.oregon-postgres.render.com/margnetra_db"
+    s = Settings(
+        DB_BACKEND="postgres",
+        DATABASE_URL=render_url,
+        SYNC_DATABASE_URL=render_url,
+    )
+    assert s.DB_BACKEND == "postgres"
+    assert s.DATABASE_URL == render_url.replace("postgres://", "postgresql+asyncpg://")
+    assert s.SYNC_DATABASE_URL == render_url.replace("postgres://", "postgresql://")
+
+
+def test_inferred_postgres_from_database_url():
+    """Verify that when DATABASE_URL is provided without DB_BACKEND, postgres is automatically inferred."""
+    render_url = "postgresql://user:pass@render-db:5432/db"
+    s = Settings(
+        DATABASE_URL=render_url,
+    )
+    assert s.DB_BACKEND == "postgres"
+    assert s.DATABASE_URL.startswith("postgresql+asyncpg://")
+
+
+def test_alembic_upgrade_on_clean_database(tmp_path):
+    """Verify that alembic upgrade head succeeds on a fresh database without NoSuchTableError."""
+    from alembic import command
+    from alembic.config import Config
+    import sqlite3
+
+    db_path = tmp_path / "fresh_test.db"
+    sync_url = f"sqlite:///{db_path.as_posix()}"
+    async_url = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+
+    cfg = Config("alembic.ini")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("DB_BACKEND", "sqlite")
+        mp.setenv("SQLITE_DATABASE_URL", async_url)
+        mp.setenv("SQLITE_SYNC_DATABASE_URL", sync_url)
+        from app.core import config
+        mp.setattr(config.settings, "DB_BACKEND", "sqlite")
+        mp.setattr(config.settings, "DATABASE_URL", async_url)
+        mp.setattr(config.settings, "SYNC_DATABASE_URL", sync_url)
+
+        command.upgrade(cfg, "head")
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = {r[0] for r in cursor.fetchall()}
+    assert "refresh_tokens" in tables
+    assert "users" in tables
+
+    cursor.execute("PRAGMA table_info(refresh_tokens)")
+    cols = {r[1] for r in cursor.fetchall()}
+    assert "revoked_at" in cols
+    assert "replaced_by_id" in cols
+    conn.close()

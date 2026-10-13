@@ -45,16 +45,25 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def resolve_database_urls(self) -> Settings:
+        # If DATABASE_URL is provided with a PostgreSQL URL, automatically select postgres backend
+        # unless an explicit non-sqlite backend was chosen.
+        if self.DATABASE_URL:
+            if "neon.tech" in self.DATABASE_URL:
+                self.DB_BACKEND = "neon"
+            elif self.DATABASE_URL.startswith(("postgres://", "postgresql://", "postgresql+asyncpg://")):
+                if self.DB_BACKEND == "sqlite":
+                    self.DB_BACKEND = "postgres"
+
         backend = (self.DB_BACKEND or "sqlite").lower()
         if backend == "sqlite":
-            async_url = self.SQLITE_DATABASE_URL or "sqlite+aiosqlite:///./margnetra.db"
-            sync_url = self.SQLITE_SYNC_DATABASE_URL or "sqlite:///./margnetra.db"
+            async_url = self.DATABASE_URL or self.SQLITE_DATABASE_URL or "sqlite+aiosqlite:///./margnetra.db"
+            sync_url = self.SYNC_DATABASE_URL or self.SQLITE_SYNC_DATABASE_URL or "sqlite:///./margnetra.db"
         elif backend == "neon":
-            async_url = self.NEON_DATABASE_URL or self.DATABASE_URL
-            sync_url = self.NEON_SYNC_DATABASE_URL or self.SYNC_DATABASE_URL
+            async_url = self.DATABASE_URL or self.NEON_DATABASE_URL
+            sync_url = self.SYNC_DATABASE_URL or self.NEON_SYNC_DATABASE_URL
         elif backend == "postgres":
-            async_url = self.POSTGRES_DATABASE_URL or self.DATABASE_URL
-            sync_url = self.POSTGRES_SYNC_DATABASE_URL or self.SYNC_DATABASE_URL
+            async_url = self.DATABASE_URL or self.POSTGRES_DATABASE_URL
+            sync_url = self.SYNC_DATABASE_URL or self.POSTGRES_SYNC_DATABASE_URL
         else:
             raise ValueError(f"Unsupported DB_BACKEND '{backend}'. Must be sqlite, neon, or postgres.")
 
