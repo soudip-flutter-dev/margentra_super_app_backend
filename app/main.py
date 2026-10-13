@@ -8,31 +8,27 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.db.init_db import init_db
 from app.utils.exceptions import register_exception_handlers
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
 )
 logger = logging.getLogger("margnetra")
-
-
-# ── Rate limiter ──────────────────────────────────────────────────────────────
-limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 
 # ── App lifespan ──────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 MargNetra backend starting up...")
+    logger.info("🚀 MargNetra backend starting up (db_backend=%s)...", settings.DB_BACKEND)
     await init_db()
     yield
     logger.info("🛑 MargNetra backend shutting down...")
@@ -81,4 +77,9 @@ if settings.USE_LOCAL_STORAGE:
 
 @app.get("/health", tags=["Health"])
 async def health_check():
-    return {"status": "ok", "app": settings.APP_NAME, "version": "1.0.0"}
+    return {
+        "status": "ok",
+        "app": settings.APP_NAME,
+        "version": "1.0.0",
+        "db_backend": settings.DB_BACKEND,
+    }

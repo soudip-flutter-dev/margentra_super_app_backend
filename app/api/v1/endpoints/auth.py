@@ -1,10 +1,9 @@
 """Auth endpoints: register, login, logout, forgot/reset password, refresh."""
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Request
 
 from app.core.dependencies import DBDep
+from app.core.limiter import limiter
 from app.schemas.auth import (
     AccessTokenResponse,
     ForgotPasswordRequest,
@@ -27,7 +26,7 @@ async def register_user(data: RegisterRequest, db: DBDep):
     
     """Register a new MargNetra user."""
     user = await auth_service.register_user(db, data)
-    
+    print("Registration hit>>>>>>>>>>>", user.email, user.phone, user.full_name)
     return user
 
 
@@ -58,8 +57,9 @@ async def logout(data: LogoutRequest, db: DBDep):
     return {"message": "Logged out successfully"}
 
 
-@router.post("/refresh", response_model=AccessTokenResponse)
-async def refresh_token(data: RefreshTokenRequest, db: DBDep):
-    """Exchange a valid refresh token for a new access token."""
+@router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def refresh_token(request: Request, data: RefreshTokenRequest, db: DBDep):
+    """Exchange a valid refresh token for a new access token and rotated refresh token."""
     result = await auth_service.refresh_access_token(db, data.refresh_token)
     return result

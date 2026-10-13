@@ -22,3 +22,4 @@ margnetra.db
 htmlcov/
 *.log
 .DS_Store
+.agents/

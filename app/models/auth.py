@@ -20,6 +20,14 @@ class RefreshToken(Base, TimestampMixin):
     token_hash: Mapped[str] = mapped_column(sa.String(512), nullable=False, unique=True)
     expires_at: Mapped[sa.DateTime] = mapped_column(sa.DateTime(timezone=True), nullable=False)
     is_revoked: Mapped[bool] = mapped_column(sa.Boolean, default=False, nullable=False)
+    revoked_at: Mapped[Optional[sa.DateTime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    replaced_by_id: Mapped[Optional[int]] = mapped_column(
+        sa.Integer,
+        sa.ForeignKey("refresh_tokens.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
 
 class PasswordResetOTP(Base, TimestampMixin):

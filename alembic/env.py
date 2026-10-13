@@ -23,13 +23,23 @@ target_metadata = Base.metadata
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    is_sqlite = (settings.DB_BACKEND == "sqlite") or ("sqlite" in str(connection.engine.url))
+    context_kwargs = {
+        "connection": connection,
+        "target_metadata": target_metadata,
+        "compare_type": True,
+    }
+    if is_sqlite:
+        context_kwargs["render_as_batch"] = True
+    context.configure(**context_kwargs)
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_async_migrations():
-    engine = create_async_engine(settings.DATABASE_URL)
+    is_sqlite = (settings.DB_BACKEND == "sqlite") or ("sqlite" in settings.DATABASE_URL)
+    connect_args = {"check_same_thread": False} if is_sqlite else {}
+    engine = create_async_engine(settings.DATABASE_URL, connect_args=connect_args)
     async with engine.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await engine.dispose()
@@ -41,12 +51,16 @@ def run_migrations_online():
 
 def run_migrations_offline():
     url = settings.SYNC_DATABASE_URL
-    context.configure(
-        url=url,
-        target_metadata=target_metadata,
-        literal_binds=True,
-        dialect_opts={"paramstyle": "named"},
-    )
+    is_sqlite = (settings.DB_BACKEND == "sqlite") or ("sqlite" in url)
+    context_kwargs = {
+        "url": url,
+        "target_metadata": target_metadata,
+        "literal_binds": True,
+        "dialect_opts": {"paramstyle": "named"},
+    }
+    if is_sqlite:
+        context_kwargs["render_as_batch"] = True
+    context.configure(**context_kwargs)
     with context.begin_transaction():
         context.run_migrations()
 

@@ -8,7 +8,7 @@ import string
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -84,7 +84,7 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
 
     print(
         f"\n========================================================\n"
-        f"🎉 [NEW USER REGISTERED]\n"
+        f"[NEW USER REGISTERED]\n"
         f"   • User ID    : {user.id}\n"
         f"   • Full Name  : {user.full_name}\n"
         f"   • Phone      : {user.phone}\n"
@@ -103,13 +103,13 @@ async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(data.password, user.hashed_password):
-        print(f"\n⚠️  [LOGIN FAILED] Invalid credentials for: '{identifier}'\n", flush=True)
+        print(f"\n[LOGIN FAILED] Invalid credentials for: '{identifier}'\n", flush=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid phone, email, or password",
         )
     if not user.is_active:
-        print(f"\n⚠️  [LOGIN BLOCKED] Inactive account for: '{identifier}'\n", flush=True)
+        print(f"\n[LOGIN BLOCKED] Inactive account for: '{identifier}'\n", flush=True)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
     access_token = create_access_token(user.id)
@@ -126,7 +126,7 @@ async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
 
     print(
         f"\n========================================================\n"
-        f"👤 [USER LOGIN SUCCESS]\n"
+        f"[USER LOGIN SUCCESS]\n"
         f"   • User ID    : {user.id}\n"
         f"   • Full Name  : {user.full_name}\n"
         f"   • Phone      : {user.phone}\n"
@@ -155,30 +155,112 @@ async def logout_user(db: AsyncSession, refresh_token_raw: str) -> None:
     record = result.scalar_one_or_none()
     if record:
         record.is_revoked = True
+        record.revoked_at = _utcnow()
         await db.commit()
 
 
-async def refresh_access_token(db: AsyncSession, refresh_token_raw: str) -> dict:
+async def refresh_access_token(db: AsyncSession, refresh_token_raw: str) -> TokenResponse:
     from app.core.security import verify_refresh_token  # noqa: PLC0415
 
     payload = verify_refresh_token(refresh_token_raw)
     if not payload:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
-    token_hash = _hash_token(refresh_token_raw)
-    result = await db.execute(
-        select(RefreshToken).where(
-            RefreshToken.token_hash == token_hash,
-            RefreshToken.is_revoked.is_(False),
+    try:
+        user_id = int(payload["sub"])
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token payload")
+
+    # Validate user exists and is active (AC-3)
+    user_result = await db.execute(select(User).where(User.id == user_id))
+    user = user_result.scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account inactive or deleted",
         )
-    )
+
+    token_hash = _hash_token(refresh_token_raw)
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     record = result.scalar_one_or_none()
     if not record or _is_expired(record.expires_at):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired or revoked")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired or invalid")
 
-    user_id = payload["sub"]
-    new_access = create_access_token(user_id)
-    return {"access_token": new_access, "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60}
+    now = _utcnow()
+
+    # Handle already revoked token: check grace window vs breach cascade revocation
+    if record.is_revoked:
+        is_within_grace = False
+        if record.revoked_at and record.replaced_by_id is not None:
+            revoked_at = record.revoked_at
+            if revoked_at.tzinfo is None:
+                revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+            delta = (now - revoked_at).total_seconds()
+            if 0 <= delta <= settings.REFRESH_TOKEN_ROTATION_GRACE_SECONDS:
+                successor = (
+                    await db.execute(
+                        select(RefreshToken).where(RefreshToken.id == record.replaced_by_id)
+                    )
+                ).scalar_one_or_none()
+                if successor and not successor.is_revoked:
+                    is_within_grace = True
+
+        if not is_within_grace:
+            # Breach detected outside grace window: revoke all active sessions for this user (AC-5)
+            await db.execute(
+                update(RefreshToken)
+                .where(RefreshToken.user_id == user_id, RefreshToken.is_revoked == False)
+                .values(is_revoked=True, revoked_at=now)
+            )
+            await db.commit()
+            db.expire_all()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Compromised session: all sessions revoked",
+            )
+
+        # Within grace window (AC-4): issue fresh replacement pair without revoking all sessions
+        new_access = create_access_token(user.id)
+        new_refresh_raw = create_refresh_token(user.id)
+        new_token_record = RefreshToken(
+            user_id=user.id,
+            token_hash=_hash_token(new_refresh_raw),
+            expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        )
+        db.add(new_token_record)
+        await db.flush()
+        record.replaced_by_id = new_token_record.id
+        await db.commit()
+        return TokenResponse(
+            access_token=new_access,
+            refresh_token=new_refresh_raw,
+            token_type="bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        )
+
+    # Normal rotation (AC-1, AC-2)
+    record.is_revoked = True
+    record.revoked_at = now
+
+    new_access = create_access_token(user.id)
+    new_refresh_raw = create_refresh_token(user.id)
+    new_token_record = RefreshToken(
+        user_id=user.id,
+        token_hash=_hash_token(new_refresh_raw),
+        expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    db.add(new_token_record)
+    await db.flush()
+
+    record.replaced_by_id = new_token_record.id
+    await db.commit()
+
+    return TokenResponse(
+        access_token=new_access,
+        refresh_token=new_refresh_raw,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
 
 
 async def forgot_password(db: AsyncSession, phone: str) -> str:

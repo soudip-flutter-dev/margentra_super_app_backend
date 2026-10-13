@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import AsyncGenerator
+
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
 import pytest
 import pytest_asyncio
@@ -38,6 +41,12 @@ async def db_session(setup_db) -> AsyncGenerator[AsyncSession, None]:
     async with test_session_factory() as session:
         yield session
         await session.rollback()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    from app.core.limiter import limiter
+    limiter.reset()
 
 
 @pytest_asyncio.fixture

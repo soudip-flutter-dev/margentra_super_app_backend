@@ -12,7 +12,7 @@ engine_kwargs: dict[str, Any] = {
     "echo": settings.DEBUG,
 }
 
-if "sqlite" in settings.DATABASE_URL:
+if settings.DB_BACKEND == "sqlite" or "sqlite" in settings.DATABASE_URL:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
 else:
     engine_kwargs.update(
