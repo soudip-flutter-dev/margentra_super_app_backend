@@ -33,6 +33,8 @@ async def register_user(data: RegisterRequest, db: DBDep):
 @router.post("/login", response_model=TokenResponse)
 async def login(data: LoginRequest, db: DBDep, request: Request):
     """Authenticate and receive JWT access + refresh tokens."""
+    ident = data.phone or data.email or data.username or data.identifier or data.phone_number or data.login
+    print(f"Login hit >>>>>>>>>>> identifier={ident}", flush=True)
     return await auth_service.login_user(db, data)
 
 

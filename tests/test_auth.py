@@ -137,3 +137,51 @@ async def test_logout(client: AsyncClient):
     # Refreshing after logout should fail
     resp2 = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_token})
     assert resp2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_flexible_identifiers(client: AsyncClient):
+    # Register with +91 country code and lowercase email
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "full_name": "Flex User",
+            "phone": "+919876599999",
+            "email": "flexuser@example.com",
+            "password": "SecurePass1",
+            "confirm_password": "SecurePass1",
+        },
+    )
+    assert reg.status_code == 201
+
+    # 1. Login with 10-digit phone (omitting +91)
+    r1 = await client.post(
+        "/api/v1/auth/login",
+        json={"phone": "9876599999", "password": "SecurePass1"},
+    )
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert "access_token" in d1
+    assert d1["user"]["full_name"] == "Flex User"
+
+    # 2. Login with uppercase email
+    r2 = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "FLEXUSER@EXAMPLE.COM", "password": "SecurePass1"},
+    )
+    assert r2.status_code == 200
+    assert r2.json()["user"]["email"] == "flexuser@example.com"
+
+    # 3. Login using 'identifier' alias field
+    r3 = await client.post(
+        "/api/v1/auth/login",
+        json={"identifier": "9876599999", "password": "SecurePass1"},
+    )
+    assert r3.status_code == 200
+
+    # 4. Login using 'username' alias field
+    r4 = await client.post(
+        "/api/v1/auth/login",
+        json={"username": "flexuser@example.com", "password": "SecurePass1"},
+    )
+    assert r4.status_code == 200

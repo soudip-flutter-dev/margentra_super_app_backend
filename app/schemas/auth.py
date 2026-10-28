@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
+
+from app.schemas.user import UserProfileOut
 
 
 class RegisterRequest(BaseModel):
@@ -38,11 +42,22 @@ class LoginRequest(BaseModel):
     phone: str | None = None
     email: str | None = None
     username: str | None = None
+    identifier: str | None = None
+    phone_number: str | None = None
+    login: str | None = None
     password: str
 
     @model_validator(mode="after")
     def validate_identifier(self) -> "LoginRequest":
-        if not self.phone and not self.email and not self.username:
+        raw = (
+            self.phone
+            or self.email
+            or self.username
+            or self.identifier
+            or self.phone_number
+            or self.login
+        )
+        if not raw or not str(raw).strip():
             raise ValueError("Please provide either 'phone' or 'email' to login")
         return self
 
@@ -77,6 +92,7 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int  # seconds
+    user: Optional["UserProfileOut"] = None
 
 
 class AccessTokenResponse(BaseModel):

@@ -8,7 +8,7 @@ import string
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -27,6 +27,7 @@ from app.schemas.auth import (
     ResetPasswordRequest,
     TokenResponse,
 )
+from app.schemas.user import UserProfileOut
 
 
 def _hash_token(token: str) -> str:
@@ -96,20 +97,61 @@ async def register_user(db: AsyncSession, data: RegisterRequest) -> User:
 
 
 async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
-    identifier = (data.phone or data.email or data.username or "").strip()
-    result = await db.execute(
-        select(User).where(or_(User.phone == identifier, User.email == identifier))
-    )
+    # 1. Resolve raw identifier from any supported field alias
+    raw_ident = (
+        data.phone
+        or data.email
+        or data.username
+        or data.identifier
+        or data.phone_number
+        or data.login
+        or ""
+    ).strip()
+
+    # 2. Build candidate phone variations (handles +91, 91, 10-digit local, dashes, spaces)
+    clean_digits = "".join(c for c in raw_ident if c.isdigit())
+    phone_candidates: set[str] = {raw_ident}
+    if clean_digits:
+        phone_candidates.add(clean_digits)
+        if len(clean_digits) == 10:
+            phone_candidates.add("+91" + clean_digits)
+            phone_candidates.add("91" + clean_digits)
+            phone_candidates.add("0" + clean_digits)
+        elif len(clean_digits) == 12 and clean_digits.startswith("91"):
+            phone_candidates.add("+" + clean_digits)
+            phone_candidates.add(clean_digits[2:])
+        elif clean_digits.startswith("0") and len(clean_digits) == 11:
+            phone_candidates.add(clean_digits[1:])
+            phone_candidates.add("+91" + clean_digits[1:])
+
+    # 3. Build lookup criteria: phone candidate list OR case-insensitive email match
+    conditions = [
+        User.phone.in_(list(phone_candidates)),
+        func.lower(User.email) == raw_ident.lower(),
+    ]
+
+    # If data.phone or data.email were explicitly supplied separately
+    if data.email and data.email.strip():
+        conditions.append(func.lower(User.email) == data.email.strip().lower())
+    if data.phone and data.phone.strip():
+        p_clean = "".join(c for c in data.phone if c.isdigit())
+        if p_clean:
+            conditions.append(User.phone == data.phone.strip())
+            conditions.append(User.phone == p_clean)
+            if len(p_clean) == 10:
+                conditions.append(User.phone == "+91" + p_clean)
+
+    result = await db.execute(select(User).where(or_(*conditions)))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(data.password, user.hashed_password):
-        print(f"\n[LOGIN FAILED] Invalid credentials for: '{identifier}'\n", flush=True)
+        print(f"\n[LOGIN FAILED] Invalid credentials for identifier: '{raw_ident}'\n", flush=True)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid phone, email, or password",
         )
     if not user.is_active:
-        print(f"\n[LOGIN BLOCKED] Inactive account for: '{identifier}'\n", flush=True)
+        print(f"\n[LOGIN BLOCKED] Inactive account for identifier: '{raw_ident}'\n", flush=True)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
     access_token = create_access_token(user.id)
@@ -123,6 +165,7 @@ async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
     )
     db.add(token_record)
     await db.commit()
+    await db.refresh(user)
 
     print(
         f"\n========================================================\n"
@@ -141,6 +184,7 @@ async def login_user(db: AsyncSession, data: LoginRequest) -> TokenResponse:
         access_token=access_token,
         refresh_token=refresh_token_raw,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserProfileOut.model_validate(user),
     )
 
 

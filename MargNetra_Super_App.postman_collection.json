@@ -2,7 +2,7 @@
   "info": {
     "name": "MargNetra Super App Backend API",
     "_postman_id": "margnetra-super-app-v1",
-    "description": "Complete 50-endpoint Postman Collection for MargNetra Super App FastAPI Backend with automated JWT auth token extraction and realistic request payloads.",
+    "description": "Complete 51-endpoint Postman Collection for MargNetra Super App FastAPI Backend with automated JWT auth token extraction and realistic request payloads.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -13,6 +13,11 @@
     },
     {
       "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
       "value": "",
       "type": "string"
     }
@@ -88,14 +93,18 @@
             {
               "listen": "test",
               "script": {
+                "type": "text/javascript",
                 "exec": [
                   "var jsonData = pm.response.json();",
                   "if (jsonData.access_token) {",
                   "    pm.collectionVariables.set(\"token\", jsonData.access_token);",
                   "    console.log(\"Saved JWT access_token to collection variable {{token}}\");",
+                  "}",
+                  "if (jsonData.refresh_token) {",
+                  "    pm.collectionVariables.set(\"refreshToken\", jsonData.refresh_token);",
+                  "    console.log(\"Saved refresh_token to collection variable {{refreshToken}}\");",
                   "}"
-                ],
-                "type": "text/javascript"
+                ]
               }
             }
           ]
@@ -128,9 +137,28 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"refresh_token\": \"YOUR_REFRESH_TOKEN\"\n}"
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
             }
-          }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.access_token) {",
+                  "    pm.collectionVariables.set(\"token\", jsonData.access_token);",
+                  "    console.log(\"Rotated access_token saved to {{token}}\");",
+                  "}",
+                  "if (jsonData.refresh_token) {",
+                  "    pm.collectionVariables.set(\"refreshToken\", jsonData.refresh_token);",
+                  "    console.log(\"Rotated refresh_token saved to {{refreshToken}}\");",
+                  "}"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Logout",
@@ -170,7 +198,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"refresh_token\": \"YOUR_REFRESH_TOKEN\"\n}"
+              "raw": "{\n  \"refresh_token\": \"{{refreshToken}}\"\n}"
             }
           }
         },
@@ -579,6 +607,52 @@
               "mode": "raw",
               "raw": "{\n  \"theme\": \"dark\",\n  \"hud_mode\": true,\n  \"sound_alerts\": true\n}"
             }
+          }
+        },
+        {
+          "name": "Upload Avatar Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/user/avatar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "user",
+                "avatar"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Avatar image binary file (JPEG, PNG, WebP)"
+                }
+              ]
+            },
+            "description": "Upload a profile avatar image for the authenticated user. Stored via local disk or AWS S3."
           }
         }
       ]
@@ -1959,6 +2033,77 @@
                 "health"
               ]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "14. Real-Time WebSockets",
+      "item": [
+        {
+          "name": "Live Trip Telemetry Stream (WS)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ws/trip/live?token={{token}}&trip_id=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ws",
+                "trip",
+                "live"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "description": "Bearer JWT Token"
+                },
+                {
+                  "key": "trip_id",
+                  "value": "1",
+                  "description": "Active Trip ID"
+                }
+              ]
+            },
+            "description": "Real-time WebSocket telemetry stream. Connect via ws:// or wss:// in Postman to receive live speed, rpm, g_force, and engine_temp frames."
+          }
+        },
+        {
+          "name": "Family Circle Live Tracking (WS)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/ws/family/live?token={{token}}&family_circle_id=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "ws",
+                "family",
+                "live"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "description": "Bearer JWT Token"
+                },
+                {
+                  "key": "family_circle_id",
+                  "value": "1",
+                  "description": "Family Circle ID"
+                }
+              ]
+            },
+            "description": "Real-time WebSocket family tracking stream. Connect via ws:// or wss:// in Postman to receive live GPS coordinates for moving family circle members."
           }
         }
       ]
